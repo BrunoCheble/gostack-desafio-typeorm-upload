@@ -3,12 +3,11 @@ import fs from 'fs';
 import csv from 'csv-parse';
 import Transaction from '../models/Transaction';
 import uploadConfig from '../config/upload';
-import AppError from '../errors/AppError';
+
 import CreateTransactionService from './CreateTransactionService';
-// import CreateCategoryService from './CreateCategoryService';
 
 interface Request {
-  transactionsFileName: string;
+  fileName: string;
 }
 
 interface TransactionFile {
@@ -28,46 +27,34 @@ class ImportTransactionsService {
     this.transactionsFile = [];
   }
 
-  async execute({ transactionsFileName }: Request): Promise<Transaction[]> {
-    const transactionsFilePath = path.join(
-      uploadConfig.directory,
-      transactionsFileName,
-    );
-
-    const transactionsFileExists = await fs.promises.stat(transactionsFilePath);
-
-    if (!transactionsFileExists) {
-      throw new AppError('Error internal');
-    }
-
+  async execute({ fileName }: Request): Promise<Transaction[]> {
     const createTransactionService = new CreateTransactionService();
 
-    const transactionsCreated = async (): Promise<Transaction[]> => {
-      return Promise.all(
-        this.transactionsFile.map(({ title, value, type, category }) =>
-          createTransactionService.execute({
-            title,
-            value,
-            type,
-            category,
-          }),
-        ),
-      );
-    };
+    const transactionsFilePath = path.join(uploadConfig.directory, fileName);
 
-    const fileCsv = fs
+    const csvParsed = csv({ ltrim: true, columns: true });
+
+    const fileParsed = fs
       .createReadStream(transactionsFilePath)
-      .pipe(csv({ ltrim: true, columns: true }))
-      .on('data', (data: TransactionFile) => {
-        this.transactionsFile.push({ ...data, value: Number(data.value) });
-      });
+      .pipe(csvParsed);
 
-    this.transactions = await new Promise((resolve, _) => {
-      fileCsv.on('end', async () => {
-        const transactions = await transactionsCreated();
-        resolve(transactions);
-      });
+    fileParsed.on('data', (data: TransactionFile) => {
+      this.transactionsFile.push({ ...data, value: Number(data.value) });
     });
+
+    await new Promise(resolve => fileParsed.on('end', resolve));
+
+    // eslint-disable-next-line no-restricted-syntax
+    for (const { title, type, value, category } of this.transactionsFile) {
+      // eslint-disable-next-line no-await-in-loop
+      const transaction = await createTransactionService.execute({
+        title,
+        type,
+        value,
+        category,
+      });
+      this.transactions.push(transaction);
+    }
 
     await fs.promises.unlink(transactionsFilePath);
 

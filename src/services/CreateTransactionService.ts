@@ -21,28 +21,29 @@ class CreateTransactionService {
     const categoryRepository = getRepository(Category);
     const transactionsRepository = getCustomRepository(TransactionsRepository);
 
+    if (type !== 'income' && type !== 'outcome') {
+      throw new AppError('Tipo Inválido', 401);
+    }
+
     // Se for outcome, faz a verificação do total não ser suficiente
-    if (type === 'outcome') {
-      const { total } = await transactionsRepository.getBalance();
-      if (total < value) {
-        throw new AppError('Invalid Credit!');
-      }
+    const { total } = await transactionsRepository.getBalance();
+
+    if (type === 'outcome' && value > total) {
+      throw new AppError('Invalid Credit!');
     }
 
     // Busca a categoria, se existir
-    const categoryFound = await categoryRepository.findOne({
+    const categoryExists = await categoryRepository.findOne({
       where: { title: category },
     });
 
-    let category_id = null;
+    let category_id = categoryExists?.id;
 
     // Caso não exista, cria uma nova e coloca o id da novategoria na variável category_id
-    if (!categoryFound) {
+    if (!categoryExists) {
       const newCategory = categoryRepository.create({ title: category });
       await categoryRepository.save(newCategory);
       category_id = newCategory.id;
-    } else {
-      category_id = categoryFound.id;
     }
 
     const transaction = transactionsRepository.create({
